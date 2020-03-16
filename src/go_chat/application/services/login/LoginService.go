@@ -5,6 +5,7 @@ import (
 	"github.com/astaxie/beego/logs"
 	"github.com/wxnacy/wgo/arrays"
 	"go_chat/application/services"
+	"go_chat/application/services/push"
 	"go_chat/common"
 	"go_chat/pool"
 	"reflect"
@@ -12,19 +13,14 @@ import (
 	"strings"
 )
 
-type returnData struct {
-	status int
-	msg    string
-	data   map[string]interface{}
-}
-
 type LoginService struct {
 	services.CommonService
 	common.CommonFunction
+	push.PushEventGenerator
 	Index int
 }
 
-func (l *LoginService) Register(umsg common.UserMessage) (result returnData) {
+func (l *LoginService) Register(umsg common.UserMessage) (result common.ReturnData) {
 	if umsg.FirstTopic == 0 || umsg.SecondTopic == 0 {
 		logs.Error("必须要带有一级或二级topic才能通过验证！")
 	}
@@ -32,21 +28,25 @@ func (l *LoginService) Register(umsg common.UserMessage) (result returnData) {
 		logs.Error("用户ID不存在，请重试！")
 	}
 	result = l.saveToRedis(umsg)
+	if result.Status != 0 {
+		return
+	}
+	l.Update()
 	return
 }
 
-func (l *LoginService) LogOut() (result *returnData) {
+func (l *LoginService) LogOut() (result common.ReturnData) {
 	result = l.removeFromRedis(l.Index)
 	return
 }
-func (l *LoginService) removeFromRedis(index int) (result *returnData) {
+func (l *LoginService) removeFromRedis(index int) (result common.ReturnData) {
 	//获取redis实例
 	i := strconv.Itoa(index)
 	client, _ := new(pool.Pool).GetRedisInstance()
 	defer client.Close()
 	user_id, _ := client.Do("HGET", services.UserBindRedisKey, i)
 	fmt.Println("user_id,,,,,,,", user_id)
-	if user_id==nil{
+	if user_id == nil {
 		return
 	}
 	user_id = l.B2S(user_id)
@@ -60,26 +60,26 @@ func (l *LoginService) removeFromRedis(index int) (result *returnData) {
 	fmt.Println("group is:", reflect.TypeOf(group), group)
 	client.Do("DEL", rk)
 	groupArr := strings.Split(groups, "_")
-	fmt.Println("groupArr================",reflect.TypeOf(groupArr), groupArr)
+	fmt.Println("groupArr================", reflect.TypeOf(groupArr), groupArr)
 	rk = services.RedisKeyGroupUser
 	rk = strings.Replace(rk, "first_topic", groupArr[0], -1)
 	rk = strings.Replace(rk, "second_topic", groupArr[1], -1)
 	userList, _ := client.Do("GET", rk)
 	userListArr := strings.Split(l.B2S(userList), ",")
-	arrIndex:=arrays.Contains(userListArr,user_id)
-	userListArr=append(userListArr[:arrIndex], userListArr[arrIndex+1:]...)
-	if len(userListArr)==0{
-		client.Do("DEL",rk)
-	}else{
-		client.Do("SET",rk,strings.Replace(strings.Trim(fmt.Sprint(userListArr), "[]"), " ", ",", -1))
+	arrIndex := arrays.Contains(userListArr, user_id)
+	userListArr = append(userListArr[:arrIndex], userListArr[arrIndex+1:]...)
+	if len(userListArr) == 0 {
+		client.Do("DEL", rk)
+	} else {
+		client.Do("SET", rk, strings.Replace(strings.Trim(fmt.Sprint(userListArr), "[]"), " ", ",", -1))
 	}
 	//删除fd绑定的用户。
-	client.Do("HDEL",services.FdBindUserRedisKey,user_id)
+	client.Do("HDEL", services.FdBindUserRedisKey, user_id)
 	return
 
 }
 
-func (l *LoginService) saveToRedis(umsg common.UserMessage) (result returnData) {
+func (l *LoginService) saveToRedis(umsg common.UserMessage) (result common.ReturnData) {
 	rk := services.RedisKeyGroupUser
 	rk = strings.Replace(rk, "first_topic", strconv.Itoa(umsg.FirstTopic), -1)
 	rk = strings.Replace(rk, "second_topic", strconv.Itoa(umsg.SecondTopic), -1)
@@ -90,7 +90,7 @@ func (l *LoginService) saveToRedis(umsg common.UserMessage) (result returnData) 
 	if err != nil {
 		logs.Error("get user list error:", err)
 	}
-	userListArr:=strings.Split(l.B2S(userList),",")
+	userListArr := strings.Split(l.B2S(userList), ",")
 	userListArr = append(userListArr, strconv.Itoa(umsg.UserId))
 	userListArr = l.UniqueArr(userListArr)
 	client.Do("SET", rk, strings.Replace(strings.Trim(fmt.Sprint(userListArr), "[]"), " ", ",", -1))

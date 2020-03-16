@@ -6,6 +6,9 @@ import (
 	"github.com/astaxie/beego/logs"
 	"github.com/gorilla/websocket"
 	services "go_chat/application/services/login"
+	"go_chat/application/services/message"
+	"go_chat/application/services/push"
+	"go_chat/application/services/user"
 	"go_chat/common"
 	"time"
 )
@@ -18,10 +21,11 @@ const (
 
 type MessageController struct {
 	Index int
-	Conn  *websocket.Conn
+	Conn *websocket.Conn
 }
 
 func (m *MessageController) GetMessage() {
+	fmt.Println("当前websocket的index为：",m.Index)
 	defer m.CloseWebSocket()
 	//读大小限制
 	m.Conn.SetReadLimit(maxMessageSize)
@@ -42,6 +46,8 @@ func (m *MessageController) GetMessage() {
 			UserId:      0,
 			FirstTopic:  0,
 			SecondTopic: 0,
+			MsgType: 0,
+			MsgContent: "",
 		}
 		fmt.Println("msg==============", msg)
 		err = json.Unmarshal([]byte(msg), &umsg)
@@ -55,12 +61,52 @@ func (m *MessageController) GetMessage() {
 			loginService := services.LoginService{
 				Index: m.Index,
 			}
+			messageContent:=common.MessageContent{
+				FirstTopic: umsg.FirstTopic,
+				SecondTopic: umsg.SecondTopic,
+				MsgType: 0,
+				MsgContent: fmt.Sprintf("UserId为%v进入了房间",umsg.UserId),
+				UserId: umsg.UserId,
+			}
+			//给自己推送一个注册成功的信息
+			PushToSelf:=new(push.PushToAllMessage)
+			PushToSelf.Status=0
+			PushToSelf.Msg="注册成功！"
+			PushToSelf.Fds=[]int{m.Index}
+			loginService.Add(PushToSelf)
+			//给所有人推送 xxx进来了的信息
+			fds:=new(user.UserService).GetFdByGroup(umsg.FirstTopic,umsg.SecondTopic)
+			fds=append(fds,m.Index)
+			fmt.Println("fds===================",fds)
+			PushToAllObj:=new(push.PushToAllMessage)
+			PushToAllObj.Status=0;
+			PushToAllObj.Data=messageContent
+			PushToAllObj.Fds=fds
+			loginService.Add(PushToAllObj)
+
 			result := loginService.Register(umsg)
 			fmt.Println(result)
-
 			break
 		case "message":
-			fmt.Println("this is a message")
+			messageContent:=common.MessageContent{
+				FirstTopic: umsg.FirstTopic,
+				SecondTopic: umsg.SecondTopic,
+				MsgType: umsg.MsgType,
+				MsgContent: umsg.MsgContent,
+				UserId: umsg.UserId,
+			}
+			fds:=new(user.UserService).GetFdByGroup(umsg.FirstTopic,umsg.SecondTopic)
+			fds=append(fds,m.Index)
+			fmt.Println("fds===================",fds)
+			PushToAllObj:=new(push.PushToAllMessage)
+			PushToAllObj.Status=0;
+			PushToAllObj.Data=messageContent
+			PushToAllObj.Fds=fds
+			messageservice:=new(message.MessageService)
+			messageservice.Add(PushToAllObj)
+			messageservice.Update()
+
+
 			break
 		default:
 			fmt.Println("this is default")
@@ -77,7 +123,7 @@ func (m *MessageController) CloseWebSocket() {
 	}
 	result := loginService.LogOut()
 	fmt.Println(result)
-	common.Client = append(common.Client[:m.Index], common.Client[m.Index+1:]...)
+	common.Client[m.Index]=nil
 	m.Conn.Close()
 	fmt.Println("common.client.len:", len(common.Client))
 	fmt.Println("common.client:", common.Client)

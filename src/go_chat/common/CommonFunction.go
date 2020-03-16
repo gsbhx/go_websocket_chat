@@ -1,5 +1,11 @@
 package common
 
+import (
+	"bytes"
+	"encoding/binary"
+	"fmt"
+)
+
 type CommonFunction struct {
 }
 
@@ -25,4 +31,19 @@ func (c *CommonFunction) B2S(bs interface{}) string {
 		}
 	}
 	return string(ba)
+}
+
+//将Redis返回的数据转换为数字
+func (c *CommonFunction) B2Int(bs interface{}) int{
+	ba:=[]byte{}
+	if s,ok:=bs.([]uint8);ok{
+		for _,b:=range s{
+			ba=append(ba,byte(b))
+		}
+	}
+	bytebuff := bytes.NewBuffer(ba)
+	var data int64
+	binary.Read(bytebuff, binary.LittleEndian, &data)
+	fmt.Println("dat=================",data)
+	return int(data)
 }

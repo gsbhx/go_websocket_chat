@@ -16,12 +16,6 @@ var upgrader = websocket.Upgrader{
 	},
 }
 
-
-type Clients struct {
-	conn map[*websocket.Conn]bool
-
-}
-
 func IndexHandler(w http.ResponseWriter, r *http.Request) {
 	conn, err := upgrader.Upgrade(w, r, nil)
 	fmt.Println(&conn)
